@@ -3,33 +3,33 @@
 #include <unistd.h>
 #include <sys/times.h>
 #include <math.h>
+#include <stdlib.h>
 #define BUFSIZE 100000
 
-int modexp(int g, int u,int p){
-	int s = 1;
-	//printf("\ng=%d p=%d u=%d",g,p,u);
+unsigned long modexp(unsigned long g,unsigned long u,unsigned long p){
+	unsigned long s = 1;
 	while (u!=0){
       if ((u & 1) !=0)
         s = (s * g ) % p;
       u = u >>  1;
       g = (g*g) % p;
     }
-	//printf(" s=%d ",s);
 	return s;
 }
 
 int main(int argc, char *argv[]){
-	int factors[100000]={0};
-	int gen[100000] = {0};
-	int count[32]={0};
-	int countgen[32] = {0};
-	int numprocs,myid;
-	int sqr,max_e_per_proc;
-	int startval,i;
-	int phi;
-	int globalsum;
+	long *factors;
+	long *wholeFactors;
+	unsigned int count[32]={0};
+	long countgen[32] = {0};
+	unsigned int numprocs,myid;
+	unsigned int sqr,max_e_per_proc, max_e_per_proc2;
+	long startval;
+	unsigned int i;
+	unsigned int phi,z, flag;
+	long globalsum;
 	const int root =0;
-	int p;
+	unsigned int p;
 	if (argc>=2){
 		p = atoi(argv[1]);
 	}
@@ -42,46 +42,79 @@ int main(int argc, char *argv[]){
 	MPI_Init(&argc,&argv); 
 	MPI_Comm_size(MPI_COMM_WORLD,&numprocs); 
 	MPI_Comm_rank(MPI_COMM_WORLD,&myid);
+	MPI_Bcast(&numprocs, 1, MPI_INT, root, MPI_COMM_WORLD);
 	phi = p -1 ;
-	//sqr = ceil(sqrt(phi));
-	sqr = phi;
+	sqr = phi/2;
 	while (sqr%numprocs) ++sqr;
 	max_e_per_proc = sqr/numprocs;
+
+	// Allocating memory
+	wholeFactors = (long *) malloc( max_e_per_proc * numprocs * sizeof(long ));
+	factors = (long *) malloc(max_e_per_proc*sizeof(long));
 	if (myid==root){
 		printf("Process rank 0, p = %d, max_e_per_proc=%d\n", p, max_e_per_proc);
 		startval = 2;
 	}else{
 		startval = max_e_per_proc*myid + 1;
-		printf("Not root, rank %d startval= %d\n", myid, startval);
+		printf("Not root, rank %d startval= %d, num_proc: %d \n", myid, startval, numprocs);
 	}
+
+	// Find all the factors of p-1
 	for (i=0;i<max_e_per_proc;++i){
 		int curval = startval + i;
-		if (curval >= phi) break;
+		int upper = max_e_per_proc*(myid+1)   ;
+		if ((curval > sqr) || (curval > upper )) break; // we need to find until half or until the range of annother process
 		if ((phi % curval) == 0){
 			factors[count[0]] = curval;
 			//printf(" [%d] " , curval);
 			++count[0];
 		}
 	}
-	MPI_Allgather(factors, max_e_per_proc, MPI_INT, factors, max_e_per_proc, MPI_INT, MPI_COMM_WORLD);
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Allgather(factors, max_e_per_proc, MPI_LONG, wholeFactors, max_e_per_proc, MPI_LONG, MPI_COMM_WORLD);
 	MPI_Allgather(count, 1, MPI_INT, count , 1, MPI_INT, MPI_COMM_WORLD);
+
+	// print out the factors
+	/*if (myid == root){
+		for (i=0;i<numprocs;i++){
+			int j;
+			int startval = i*max_e_per_proc;
+			int curc = count[i];
+			for (j = 0; j < curc; j++){
+				printf(" [%d] ", wholeFactors[startval + j]);
+			}
+		}
+		printf("\n");
+	}*/
+
+	//Try out all numbers as candidates for a g
+	while (phi%numprocs) ++phi;
+	max_e_per_proc2 = phi/numprocs;
+
+	if (myid==root){
+		startval = 2;
+		//printf("Process rank 0, p = %d, max_e_per_proc=%d\n", p, max_e_per_proc);
+	}
+	else{
+		startval = max_e_per_proc2*myid + 1;
+		//printf("Not root, rank %d startval= %d, num_proc: %d \n", myid, startval, numprocs);
+	}
 	
-	i=0;
-	int z=0;
-	int flag = 0;
-	//printf("The factors: ");
-	for (z=0;z<max_e_per_proc;++z){
-		int curval = startval + z;
-		int upper = max_e_per_proc*(myid+1) +1;
+	/*printf("max_e_per_proc now = %d \n", max_e_per_proc);
+	printf("Starting to find gen\n");*/
+	for (z=0; z < max_e_per_proc2; ++z){
+		long curval = startval + z;
+		long upper = max_e_per_proc2*(myid+1)  ;
 		flag = 0;
-		//printf("\ncurval = %d ,upper=%d ",curval,upper);
-		if ((curval > p-1 )|| (curval >= upper)) break;
-		for (i=0;i<numprocs;++i){
-			int j=0;
-			int stv = max_e_per_proc*i;
-			for (j=0;j<count[i];j++){
-				//printf("\ncurval=%d ", curval);
-				if (modexp(curval, factors[stv+j],p)==1){
+		if ((curval > p-1 )|| (curval > upper)) break;
+		
+		// Try with all factors
+		for (i=0; i < numprocs; ++i){
+			long j=0;
+			long stv = max_e_per_proc*i;
+			long curc = count[i];
+			for (j=0; j < curc ; j++){
+				if (modexp(curval, wholeFactors[stv+j],p)==1){
 					flag = 1;
 					break;
 				}
@@ -90,28 +123,24 @@ int main(int argc, char *argv[]){
 		}
 		if (!flag){
 			//printf("\nfiltered curval=%d ", curval);
-			gen[countgen[0]]=curval;
+			//gen[countgen[0]]=curval;
 			++countgen[0];
+			//printf(" [[%d]] ", curval);
+			//printf(" [[%d]] ", curval);
 		}
 	}
-	//}
-	MPI_Reduce(&countgen[0], &globalsum, 1, MPI_INT, MPI_SUM , root, MPI_COMM_WORLD);
-	MPI_Allgather(gen, max_e_per_proc, MPI_INT, gen, max_e_per_proc, MPI_INT, MPI_COMM_WORLD);
-	MPI_Allgather(countgen, 1, MPI_INT, countgen , 1, MPI_INT, MPI_COMM_WORLD);
-	
+
+	MPI_Reduce(&countgen[0], &globalsum, 1, MPI_LONG, MPI_SUM , root, MPI_COMM_WORLD);
+
+
 	if (myid==root){
 		printf("\ntotal number of generators:%d \n",globalsum);
-		//printf("The generators: ");
-		/*for (i=0;i<numprocs;++i){
-			int j=0;
-			int stv = max_e_per_proc*i;
-			for (j=0;j<countgen[i];j++){
-				printf("%d ",gen[stv+j]);
-			}
-		}*/
-		
 		printf("\n");
 	}
+
 	MPI_Finalize(); 
+	free(factors);
+	free(wholeFactors);
+	
 	return 0;
 }
