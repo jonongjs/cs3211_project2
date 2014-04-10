@@ -43,13 +43,16 @@ int main(int argc, char *argv[]) {
 	unsigned long p_start, p_end, gen_candidate;
 	unsigned long factor_start, factor_end, factor_idx;
 	unsigned long array_len;
-
+	clock_t tm;
+	struct tms b4,aft;
+	int cps;
+	float tim,total,max;
 	// start the MPI
 	//MPI_Status stat;
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
+	times(&b4); 
 	// Check the input arguments
 	if (argc < 2) {
 		if (rank == 0) fprintf(stderr, "Usage: %s <prime_p> \n", argv[0]);
@@ -118,7 +121,12 @@ int main(int argc, char *argv[]) {
 	*/
 	// Sort the all_factors array
 	qsort(all_factors, (array_len * numprocs), sizeof(unsigned long), compare);	
-
+	times(&aft);
+   cps = sysconf(_SC_CLK_TCK);
+   tm = aft.tms_utime - b4.tms_utime;
+   tim = ((float)tm)/cps;
+		printf( "After sort User time from process %d is %6.3f seconds\n",rank,tim );
+   times(&b4); 
 	// print the factors for debugging
 	/*if (rank == 0) { 
 		i = 0;
@@ -160,9 +168,13 @@ int main(int argc, char *argv[]) {
 
 	// Collect total number of generators
 	MPI_Reduce(&num_gens,&total_num_gens,1,MPI_UNSIGNED_LONG,MPI_SUM,0,MPI_COMM_WORLD);
-	if(rank == 0)
+	if (rank==0)
 		printf("Total num gens: %lu\n", total_num_gens);
-
+	times(&aft);
+   cps = sysconf(_SC_CLK_TCK);
+   tm = aft.tms_utime - b4.tms_utime;
+   tim = ((float)tm)/cps;
+		printf( "Find all generators took additional time from process %d is %6.3f seconds\n",rank,tim );
 	// Clean up
 	free(local_factors);
 	free(all_factors);
