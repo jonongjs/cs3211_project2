@@ -9,13 +9,24 @@
 unsigned long modexp(unsigned long g,unsigned long u,unsigned long p){
 	unsigned long s = 1;
 	while (u!=0){
-      if ((u & 1) !=0)
-        s = (s * g ) % p;
-      u = u >>  1;
-      g = (g*g) % p;
-    }
+		if ((u & 1) !=0)
+			s = (s * g ) % p;
+		u = u >>  1;
+		g = (g*g) % p;
+	}
 	return s;
 }
+
+int isPrime(unsigned long num) {
+	if (num < 2) return 0;
+
+	unsigned long root = sqrt(num);
+	unsigned long i = 0;
+	for (i=2; i<=root; i++)
+		if ((num%i) == 0) return 0; 
+	return 1;
+} 
+
 
 int main(int argc, char *argv[]){
 	long *factors;
@@ -37,7 +48,7 @@ int main(int argc, char *argv[]){
 		printf("No value for p\n");
 		return 0;
 	}
-	
+
 	MPI_Status stat;
 	MPI_Init(&argc,&argv); 
 	MPI_Comm_size(MPI_COMM_WORLD,&numprocs); 
@@ -53,21 +64,34 @@ int main(int argc, char *argv[]){
 	factors = (long *) malloc(max_e_per_proc*sizeof(long));
 	if (myid==root){
 		printf("Process rank 0, p = %d, max_e_per_proc=%d\n", p, max_e_per_proc);
-		startval = 2;
+		startval = 3;
+		if (phi%2 ==0){
+			factors[count[0]] = 2;
+			++count[0];
+		}
 	}else{
 		startval = max_e_per_proc*myid + 1;
+		if (startval % 2 == 0){
+			if (phi % startval == 0){
+				factors[count[0]] = startval;
+				++count[0];
+			}
+			++startval;
+		}
 		printf("Not root, rank %d startval= %d, num_proc: %d \n", myid, startval, numprocs);
 	}
 
 	// Find all the factors of p-1
-	for (i=0;i<max_e_per_proc;++i){
+	for (i=0;i<max_e_per_proc;i+2){
 		int curval = startval + i;
 		int upper = max_e_per_proc*(myid+1)   ;
 		if ((curval > sqr) || (curval > upper )) break; // we need to find until half or until the range of annother process
 		if ((phi % curval) == 0){
-			factors[count[0]] = curval;
-			//printf(" [%d] " , curval);
-			++count[0];
+			if (isPrime(curval)){
+				factors[count[0]] = curval;
+				//printf(" [%d] " , curval);
+				++count[0];
+			}
 		}
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
@@ -76,15 +100,15 @@ int main(int argc, char *argv[]){
 
 	// print out the factors
 	/*if (myid == root){
-		for (i=0;i<numprocs;i++){
-			int j;
-			int startval = i*max_e_per_proc;
-			int curc = count[i];
-			for (j = 0; j < curc; j++){
-				printf(" [%d] ", wholeFactors[startval + j]);
-			}
-		}
-		printf("\n");
+	for (i=0;i<numprocs;i++){
+	int j;
+	int startval = i*max_e_per_proc;
+	int curc = count[i];
+	for (j = 0; j < curc; j++){
+	printf(" [%d] ", wholeFactors[startval + j]);
+	}
+	}
+	printf("\n");
 	}*/
 
 	//Try out all numbers as candidates for a g
@@ -99,7 +123,7 @@ int main(int argc, char *argv[]){
 		startval = max_e_per_proc2*myid + 1;
 		//printf("Not root, rank %d startval= %d, num_proc: %d \n", myid, startval, numprocs);
 	}
-	
+
 	/*printf("max_e_per_proc now = %d \n", max_e_per_proc);
 	printf("Starting to find gen\n");*/
 	for (z=0; z < max_e_per_proc2; ++z){
@@ -107,7 +131,7 @@ int main(int argc, char *argv[]){
 		long upper = max_e_per_proc2*(myid+1)  ;
 		flag = 0;
 		if ((curval > p-1 )|| (curval > upper)) break;
-		
+
 		// Try with all factors
 		for (i=0; i < numprocs; ++i){
 			long j=0;
@@ -141,6 +165,6 @@ int main(int argc, char *argv[]){
 	MPI_Finalize(); 
 	free(factors);
 	free(wholeFactors);
-	
+
 	return 0;
 }
