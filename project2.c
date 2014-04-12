@@ -45,15 +45,18 @@ int main(int argc, char *argv[]) {
 	unsigned long p_start, p_end, gen_candidate;
 	unsigned long factor_start, factor_end, factor_idx;
 	unsigned long array_len;
+
+	// Variables for timing
 	clock_t tm;
-	struct tms b4,aft;
+	struct tms b4, aft;
 	int cps;
 	float tim;
-	// start the MPI
-	//MPI_Status stat;
+
+	// Start MPI
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
 	times(&b4); 
 	// Check the input arguments
 	if (argc < 2) {
@@ -61,22 +64,21 @@ int main(int argc, char *argv[]) {
 		MPI_Abort(MPI_COMM_WORLD, 1);
 	}
 	p = strtoul(argv[1], (char **)NULL, 10);
-	if(!isPrime(p)) {
+	if (!isPrime(p)) {
 		if (rank == 0) printf("p is not a prime, please try again\n");
 		MPI_Abort(MPI_COMM_WORLD, 1);
 	}	
 
-	// set-up the memory
+	// Set-up the memory
 	root = sqrt(p-1);
 	array_len = 2 * (((root-1) / numprocs) + 2); // 2 times the search range
-	local_factors = (unsigned long*) calloc(array_len,sizeof(unsigned long) );
+	local_factors = (unsigned long*) calloc(array_len, sizeof(unsigned long) );
 	all_factors = (unsigned long*) calloc( array_len * numprocs, sizeof(unsigned long) );
-	// set all data to p so that in the future sorting
-	// all unused slot will be at the end of the array
+	// set all data to 0 so that after sorting,
+	// all unused slots will be at the end of the array
 	
-	/* split number up to sqrt(p-1)
-	 * Each process computes for the half-open range [).
-	 */
+	// Split range of values from 2 to sqrt(p-1)
+	// Each process computes for the half-open range [factor_start, factor_end).
 	factor_start = 2 + ((root - 1) * rank) / numprocs;
 	if (rank < numprocs-1) factor_end = 2 + ((root-1) * (rank + 1)) / numprocs;
 	else factor_end = root + 1;
@@ -105,7 +107,6 @@ int main(int argc, char *argv[]) {
 	*/
 
 	// Gather all the factors found
-	// MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Allgather(local_factors, array_len, MPI_UNSIGNED_LONG, 
                       all_factors, array_len, MPI_UNSIGNED_LONG, MPI_COMM_WORLD);
 	// print the factors for debugging
@@ -123,6 +124,7 @@ int main(int argc, char *argv[]) {
 	// Sort the all_factors array
 	qsort(all_factors, (array_len * numprocs), sizeof(unsigned long), compare);	
 	// print the factors for debugging
+	/*
 	if (rank == 0) { 
 		i = 0;
 		printf("all_factors: ");
@@ -132,9 +134,10 @@ int main(int argc, char *argv[]) {
 		}
 		printf("\n");
 	}
-	
+	*/
 
-	// Split range p-i for finding generators
+	// Split up the range 2 to p-1 for finding generators.
+	// Each process counts the number of generators in the half-open range [p_start, p_end)
 	p_start = 2 + ((p-2) * rank) / numprocs;
 	if (rank < numprocs-1) p_end = 2 + ((p-2) * (rank+1)) / numprocs;
 	else p_end = p;
@@ -165,12 +168,14 @@ int main(int argc, char *argv[]) {
 	MPI_Reduce(&num_gens,&total_num_gens,1,MPI_UNSIGNED_LONG,MPI_SUM,0,MPI_COMM_WORLD);
 	if (rank==0)
 		printf("Total num gens: %lu\n", total_num_gens);
+
 	times(&aft);
-   cps = sysconf(_SC_CLK_TCK);
-   tm = aft.tms_utime - b4.tms_utime;
-   tim = ((float)tm)/cps;
-   if (rank == 0)
+	cps = sysconf(_SC_CLK_TCK);
+	tm = aft.tms_utime - b4.tms_utime;
+	tim = ((float)tm)/cps;
+	if (rank == 0)
 		printf( "Find all generators took time from process %d is %6.3f seconds\n",rank,tim );
+
 	// Clean up
 	free(local_factors);
 	free(all_factors);
