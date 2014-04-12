@@ -18,6 +18,17 @@ unsigned long modexp( unsigned long t, unsigned long u, unsigned long n) {
 	return s;
 }
 
+unsigned long modexp2( unsigned long startval, unsigned long t, unsigned long u, unsigned long n){
+	unsigned long s = startval;
+	while (u) {
+		if (u & 1)
+			s = (s * t) % n;
+		u >>= 1;
+		t = (t * t) % n;
+	}
+	return s;
+}
+
 int isPrime(unsigned long num) {
 	if (num < 2) return 0;
 
@@ -29,7 +40,7 @@ int isPrime(unsigned long num) {
 } 
 
 int compare(const void * a, const void *b) {
-	return (*(unsigned long*)a >= *(unsigned long*)b);
+	return (*(unsigned long*)a <= *(unsigned long*)b);
 }
 
 int main(int argc, char *argv[]) {
@@ -46,7 +57,7 @@ int main(int argc, char *argv[]) {
 	clock_t tm;
 	struct tms b4,aft;
 	int cps;
-	float tim,total,max;
+	float tim;
 	// start the MPI
 	//MPI_Status stat;
 	MPI_Init(&argc, &argv);
@@ -71,8 +82,8 @@ int main(int argc, char *argv[]) {
 	all_factors = (unsigned long*) malloc(sizeof(unsigned long) * (array_len * numprocs));
 	// set all data to p so that in the future sorting
 	// all unused slot will be at the end of the array
-	memset(local_factors, p, sizeof(unsigned long) * array_len);
-	memset(all_factors, p, sizeof(unsigned long) * (array_len * numprocs)); 
+	memset(local_factors, 0, sizeof(unsigned long) * array_len);
+	memset(all_factors, 0, sizeof(unsigned long) * (array_len * numprocs)); 
 	
 	/* split number up to sqrt(p-1)
 	 * Each process computes for the half-open range [).
@@ -121,23 +132,6 @@ int main(int argc, char *argv[]) {
 	*/
 	// Sort the all_factors array
 	qsort(all_factors, (array_len * numprocs), sizeof(unsigned long), compare);	
-	times(&aft);
-   cps = sysconf(_SC_CLK_TCK);
-   tm = aft.tms_utime - b4.tms_utime;
-   tim = ((float)tm)/cps;
-		printf( "After sort User time from process %d is %6.3f seconds\n",rank,tim );
-   times(&b4); 
-	// print the factors for debugging
-	/*if (rank == 0) { 
-		i = 0;
-		printf("all_factors: ");
-		while (i < array_len * numprocs) {
-			printf("%lu ", all_factors[i]);
-			i++;
-		}
-		printf("\n");
-	}
-	*/
 
 	// Split range p-i for finding generators
 	p_start = 2 + ((p-2) * rank) / numprocs;
@@ -149,13 +143,33 @@ int main(int argc, char *argv[]) {
 	// Finding generators
 	num_gens = 0;
 	gen_candidate = p_start;
+	unsigned long startval;
+	unsigned long prevexp;
+	// print the factors for debugging
+	/*if (rank == 0) { 
+		i = 0;
+		printf("all_factors: ");
+		while (i < array_len * numprocs) {
+			if (all_factors[i] < p)
+				printf("%lu ", all_factors[i]);
+			i++;
+		}
+		printf("\n");
+	}*/
 	while (gen_candidate < p_end) {
 		is_gen = 1;
 		factor_idx = 0;
-		while (all_factors[factor_idx] < p && is_gen) {
+		startval = 1;
+		prevexp = 0;
+		while (all_factors[factor_idx] && is_gen) {
 			//printf("modexp(%lu,%lu,%lu)=%lu\n", gen_candidate, (p-1)/factors[factor_idx], p, modexp(gen_candidate, (p-1)/factors[factor_idx],p));
-			if(modexp(gen_candidate,(p-1)/all_factors[factor_idx],p) == 1)
+
+			//printf("computing: %lu , %lu , %lu , %lu \n", startval, gen_candidate, (p-1)/all_factors[factor_idx] - prevexp, p);
+			startval = modexp2(startval,gen_candidate,(p-1)/all_factors[factor_idx] - prevexp,p);
+
+			if (startval == 1)
 				is_gen = 0;					
+			prevexp = (p-1)/all_factors[factor_idx];
 			++factor_idx;
 		}
 		if (is_gen == 1){
@@ -174,7 +188,8 @@ int main(int argc, char *argv[]) {
    cps = sysconf(_SC_CLK_TCK);
    tm = aft.tms_utime - b4.tms_utime;
    tim = ((float)tm)/cps;
-		printf( "Find all generators took additional time from process %d is %6.3f seconds\n",rank,tim );
+   if (!rank)
+		printf( "Find all generators time from process %d is %6.3f seconds\n",rank,tim );
 	// Clean up
 	free(local_factors);
 	free(all_factors);
