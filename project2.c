@@ -29,9 +29,9 @@ int isPrime(unsigned long num) {
 } 
 
 int compare(const void * a, const void *b) {
-	if (*(unsigned long*)a <= *(unsigned long*)b)
-		return 1;
-	return 0;
+	unsigned long A = *(unsigned long*)a;
+	unsigned long B = *(unsigned long*)b;
+	return (A > B) ? -1 : (A < B) ? 1 : 0;
 }
 
 int main(int argc, char *argv[]) {
